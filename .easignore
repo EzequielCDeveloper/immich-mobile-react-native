@@ -1,0 +1,22 @@
+# Sockets and temporary agent files
+*.sock
+.codegraph/
+.atl/
+openspec/
+
+# Git and IDE configs
+.git/
+.gitignore
+.vscode/
+.claude/
+
+# Dependencies and build caches
+node_modules/
+.expo/
+dist/
+web-build/
+.metro-health-check*
+
+# Tests and documentation
+coverage/
+docs/

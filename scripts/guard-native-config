@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly PROJECT_ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
+fail() {
+  printf 'Native config guard failed: %s\n' "$1" >&2
+  exit 1
+}
+
+# Deterministic, non-interactive, non-web native config check: exact Immich
+# local-only surface (ios/android public config, default orientation, automatic
+# UI style, typed routes, expo-system-ui, and NO web outlet).
+readonly CONFIG_OUT="$(mktemp)"
+trap 'rm -f "$CONFIG_OUT"' EXIT
+
+if ! "$PROJECT_ROOT/node_modules/.bin/expo" config --type public --json >"$CONFIG_OUT" 2>/dev/null; then
+  fail 'expo config exited non-zero — public native config validation aborted'
+fi
+
+node - "$CONFIG_OUT" <<'NODE'
+const fs = require('fs');
+const cfg = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const required = [];
+const check = (ok, msg) => { if (!ok) required.push(msg); };
+
+check(Array.isArray(cfg.platforms) && cfg.platforms.length === 2
+  && cfg.platforms.includes('ios') && cfg.platforms.includes('android'),
+  'platforms must be exactly ["ios","android"]');
+check(cfg.orientation === 'default', 'orientation must be "default"');
+check(cfg.userInterfaceStyle === 'automatic', 'userInterfaceStyle must be "automatic"');
+check(cfg.experiments && cfg.experiments.typedRoutes === true, 'experiments.typedRoutes must be true');
+check(Array.isArray(cfg.plugins) && cfg.plugins.includes('expo-system-ui'), 'expo-system-ui plugin must be present');
+check(!('web' in cfg), 'web config must be absent (native-only)');
+
+if (required.length) {
+  console.error('Native config guard failed:');
+  required.forEach((m) => console.error('  - ' + m));
+  process.exit(1);
+}
+NODE
+printf 'PASS\n'

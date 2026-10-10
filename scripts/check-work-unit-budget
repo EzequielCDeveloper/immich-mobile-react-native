@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly SCAFFOLD_BASE_TREE='e6674538c1483bf709750d4b7083ad5920bae12c'
+readonly PROJECT_ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly REPO_ROOT="$(git -C "$PROJECT_ROOT" rev-parse --show-toplevel)"
+
+BASE=''
+CANDIDATE=''
+MANIFEST=''
+
+fail() {
+  printf 'Budget check failed: %s\n' "$1" >&2
+  exit 1
+}
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: scripts/check-work-unit-budget --base <tree> --candidate <tree|worktree> --manifest <file>
+EOF
+  exit 1
+}
+
+while (($# > 0)); do
+  case "$1" in
+    --base)
+      (($# >= 2)) || usage
+      BASE=$2
+      shift 2
+      ;;
+    --candidate)
+      (($# >= 2)) || usage
+      CANDIDATE=$2
+      shift 2
+      ;;
+    --manifest)
+      (($# >= 2)) || usage
+      MANIFEST=$2
+      shift 2
+      ;;
+    *)
+      usage
+      ;;
+  esac
+done
+
+[[ -n "$BASE" && -n "$CANDIDATE" && -n "$MANIFEST" ]] || usage
+[[ -f "$MANIFEST" ]] || fail "manifest does not exist: $MANIFEST"
+
+if [[ "$BASE" == 'SCAFFOLD_BASE' ]]; then
+  BASE_REF=$SCAFFOLD_BASE_TREE
+else
+  BASE_REF=$BASE
+fi
+
+git -C "$REPO_ROOT" rev-parse --verify "$BASE_REF^{tree}" >/dev/null \
+  || fail "base is not a valid Git tree: $BASE"
+
+if [[ "$CANDIDATE" == 'worktree' ]]; then
+  CANDIDATE_REF=''
+else
+  CANDIDATE_REF=$(git -C "$REPO_ROOT" rev-parse --verify "$CANDIDATE^{tree}" 2>/dev/null) \
+    || fail "candidate is not a valid Git tree: $CANDIDATE"
+fi
+
+declare -A owned=()
+manifest_count=0
+while IFS= read -r entry || [[ -n "$entry" ]]; do
+  [[ -n "$entry" ]] || fail 'manifest contains an empty path'
+  [[ "$entry" != $'\r' && "$entry" != *$'\r' ]] \
+    || fail 'manifest contains a carriage return'
+  [[ "$entry" != /* ]] || fail "manifest path is absolute: $entry"
+
+  entry=${entry#./}
+  if [[ "$entry" == mobile-react-native/* ]]; then
+    repo_path=$entry
+  else
+    repo_path="mobile-react-native/$entry"
+  fi
+
+  case "$repo_path" in
+    mobile-react-native/*) ;;
+    *) fail "manifest path is outside mobile-react-native: $entry" ;;
+  esac
+  [[ "$repo_path" != *'//' && "$repo_path" != *'/./'* && "$repo_path" != *'/../'* \
+    && "$repo_path" != mobile-react-native/../* ]] \
+    || fail "manifest path is not canonical: $entry"
+  [[ -z "${owned[$repo_path]+x}" ]] || fail "manifest path is duplicated: $entry"
+
+  owned[$repo_path]=1
+  ((manifest_count += 1))
+done < "$MANIFEST"
+
+((manifest_count > 0)) || fail 'manifest is empty'
+
+mapfile -t base_paths < <(git -C "$REPO_ROOT" ls-tree -r --name-only "$BASE_REF" -- mobile-react-native)
+if [[ -z "$CANDIDATE_REF" ]]; then
+  mapfile -t candidate_paths < <(
+    {
+      git -C "$REPO_ROOT" ls-files --cached -- mobile-react-native
+      git -C "$REPO_ROOT" ls-files --others --exclude-standard -- mobile-react-native
+    } | sort -u
+  )
+else
+  mapfile -t candidate_paths < <(git -C "$REPO_ROOT" ls-tree -r --name-only "$CANDIDATE_REF" -- mobile-react-native)
+fi
+
+declare -A all_paths=()
+for path in "${base_paths[@]}" "${candidate_paths[@]}"; do
+  [[ -n "$path" ]] && all_paths[$path]=1
+done
+
+is_excluded() {
+  case "$1" in
+    mobile-react-native/node_modules/*|mobile-react-native/.expo/*|mobile-react-native/coverage/*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+base_exists() {
+  git -C "$REPO_ROOT" cat-file -e "$BASE_REF:$1" 2>/dev/null
+}
+
+candidate_exists() {
+  local path=$1
+  if [[ -z "$CANDIDATE_REF" ]]; then
+    [[ -e "$REPO_ROOT/$path" || -L "$REPO_ROOT/$path" ]]
+  else
+    git -C "$REPO_ROOT" cat-file -e "$CANDIDATE_REF:$path" 2>/dev/null
+  fi
+}
+
+candidate_hash() {
+  local path=$1
+  if [[ -z "$CANDIDATE_REF" ]]; then
+    git -C "$REPO_ROOT" hash-object -- "$REPO_ROOT/$path"
+  else
+    git -C "$REPO_ROOT" rev-parse "$CANDIDATE_REF:$path"
+  fi
+}
+
+changed_paths=()
+for path in "${!all_paths[@]}"; do
+  is_excluded "$path" && continue
+
+  before_hash=''
+  after_hash=''
+  if base_exists "$path"; then
+    before_hash=$(git -C "$REPO_ROOT" rev-parse "$BASE_REF:$path")
+  fi
+  if candidate_exists "$path"; then
+    after_hash=$(candidate_hash "$path")
+  fi
+
+  [[ "$before_hash" == "$after_hash" ]] || changed_paths+=("$path")
+done
+
+for path in "${changed_paths[@]}"; do
+  [[ -n "${owned[$path]+x}" ]] || fail "changed path is not in the manifest: $path"
+done
+
+for path in "${!owned[@]}"; do
+  [[ -n "${all_paths[$path]+x}" ]] || fail "manifest path is absent from base and candidate: $path"
+done
+
+temporary_dir=$(mktemp -d)
+trap 'rm -rf "$temporary_dir"' EXIT
+
+changed_lines=0
+for index in "${!changed_paths[@]}"; do
+  path=${changed_paths[$index]}
+  before="$temporary_dir/before-$index"
+  after="$temporary_dir/after-$index"
+
+  if base_exists "$path"; then
+    git -C "$REPO_ROOT" show "$BASE_REF:$path" > "$before"
+  else
+    : > "$before"
+  fi
+  if candidate_exists "$path"; then
+    if [[ -z "$CANDIDATE_REF" ]]; then
+      cat "$REPO_ROOT/$path" > "$after"
+    else
+      git -C "$REPO_ROOT" show "$CANDIDATE_REF:$path" > "$after"
+    fi
+  else
+    : > "$after"
+  fi
+
+  diff_status=0
+  numstat=$(git diff --no-index --numstat -- "$before" "$after" || diff_status=$?)
+  ((diff_status <= 1)) || fail "unable to measure changed path: $path"
+  IFS=$'\t' read -r additions deletions _ <<< "$numstat"
+  [[ "$additions" =~ ^[0-9]+$ ]] || additions=0
+  [[ "$deletions" =~ ^[0-9]+$ ]] || deletions=0
+  changed_lines=$((changed_lines + additions + deletions))
+done
+
+printf 'Manifest paths: %d\n' "$manifest_count"
+printf 'Changed paths: %d\n' "${#changed_paths[@]}"
+printf 'Changed lines: %d\n' "$changed_lines"
+printf 'Budget: 400\n'
+((changed_lines <= 400)) || exit 2
+printf 'PASS\n'

@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly PROJECT_ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
+fail() {
+  printf 'Immich guard failed: %s\n' "$1" >&2
+  exit 1
+}
+
+# Forbidden find patterns — React Native ONLY: zero Immich API/auth/sync.
+# The scan covers versioned app sources, config files, and scripts under the
+# project root, EXCLUDING node_modules/, .expo/, and coverage/.  The four gate
+# scripts (including this one) exclude themselves so their own match patterns
+# cannot self-trigger.  Any `/api/` path, Immich domain, or *Api/*Auth/*Client
+#/*Server/*Sync identifier is a hard fail (exit 1); plain Immich brand text in
+# UI copy is permitted and never matched here.
+readonly FORBIDDEN_PATTERN='ImmichApi|ImmichAuth|ImmichClient|ImmichServer|ImmichSync|/api/|app\.immich|immich\.cloud|immich\.app|immich\.com|@immich'
+
+mapfile -t hits < <(
+  grep -RinE \
+    --exclude-dir=node_modules --exclude-dir=.expo --exclude-dir=coverage \
+    --exclude-dir=android --exclude-dir=ios \
+    --exclude=guard-no-legacy --exclude=guard-no-immich \
+    --exclude=guard-native-config --exclude=check-work-unit-budget \
+    -E "$FORBIDDEN_PATTERN" \
+    "$PROJECT_ROOT" || true
+)
+
+if ((${#hits[@]} > 0)); then
+  printf 'Immich guard failed: Immich API/auth/sync references found:\n' >&2
+  printf '%s\n' "${hits[@]:0:10}" >&2
+  fail 'remove Immich references (no Immich API/auth/sync code permitted)'
+fi
+
+printf 'PASS\n'

@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly PROJECT_ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
+fail() {
+  printf 'Legacy guard failed: %s\n' "$1" >&2
+  exit 1
+}
+
+# expo-media-library legacy query APIs are forbidden (SDK 57 runtime throw).
+# requestPermissionsAsync stays legal and is deliberately not matched here.
+readonly LEGACY_PATTERN='\bgetAssetsAsync\b|\bgetAlbumsAsync\b|\bgetAlbumAsync\b|\bgetAssetInfoAsync\b|\bgetPermissionsAsync\b|\bpresentPermissionsPickerAsync\b'
+
+mapfile -t hits < <(
+  grep -RinE \
+    --exclude-dir=node_modules --exclude-dir=.expo --exclude-dir=coverage \
+    --exclude-dir=android --exclude-dir=ios \
+    --exclude=guard-no-legacy --exclude=guard-no-immich --exclude=guard-native-config \
+    --exclude=check-work-unit-budget \
+    -E "$LEGACY_PATTERN" \
+    "$PROJECT_ROOT" || true
+)
+
+if ((${#hits[@]} > 0)); then
+  printf 'Legacy guard failed: legacy media-library *Async references found:\n' >&2
+  printf '%s\n' "${hits[@]:0:10}" >&2
+  fail 'remove legacy getAssetsAsync/getAlbumsAsync/getPermissionsAsync-family calls'
+fi
+
+printf 'PASS\n'

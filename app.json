@@ -1,0 +1,81 @@
+{
+  "expo": {
+    "name": "mobile-react-native",
+    "slug": "mobile-react-native",
+    "version": "1.0.0",
+    "platforms": [
+      "ios",
+      "android"
+    ],
+    "orientation": "default",
+    "icon": "./assets/images/local-gallery-icon.png",
+    "scheme": "mobilereactnative",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Allow $(PRODUCT_NAME) to access your photos and videos.",
+        "NSPhotoLibraryAddUsageDescription": "Allow $(PRODUCT_NAME) to save photos and videos.",
+        "NSFaceIDUsageDescription": "Allow $(PRODUCT_NAME) to unlock your private albums."
+      },
+      "bundleIdentifier": "com.anonymous.mobilereactnative"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#102A43",
+        "foregroundImage": "./assets/images/local-gallery-adaptive-foreground.png",
+        "backgroundImage": "./assets/images/local-gallery-adaptive-background.png",
+        "monochromeImage": "./assets/images/local-gallery-adaptive-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.ACCESS_MEDIA_LOCATION",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
+      ],
+      "package": "com.anonymous.mobilereactnative"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-system-ui",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#102A43",
+          "image": "./assets/images/local-gallery-splash.png",
+          "imageWidth": 76
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow $(PRODUCT_NAME) to access your photos and videos.",
+          "savePhotosPermission": "Allow $(PRODUCT_NAME) to save photos and videos.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow $(PRODUCT_NAME) to unlock your private albums."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "5713427c-6307-499f-8921-bb7889f7bae3"
+      }
+    }
+  }
+}
